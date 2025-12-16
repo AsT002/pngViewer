@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <sys/stat.h>
 #include <zlib.h>
+#include <ctype.h>
 
 uint32_t buffer_to_int(unsigned char *buf, int s) {
 	return ((int)buf[s+0]<<24)|((int)buf[s+1]<<16)|((int)buf[s+2]<<8)|((int)buf[s+3]<<0);
@@ -112,8 +113,18 @@ int main(int argc, char** argv) {
 			INTERLACE = (0x0) | data[12];	
 			printf("WIDTH: %d;\nHEIGHT: %d;\nBIT DEPTH: %d;\nCOLOR TYPE: %d;\nCOMPRESSION: %d;\nFILTER: %d;\nINTERLACE: %d;\n", WIDTH, HEIGHT, BIT_DEPTH, COLOR_TYPE, COMPRESSION, FILTER, INTERLACE);
 		
-			
-			
+			if (COLOR_TYPE != 6 || BIT_DEPTH != 8 || COMPRESSION != 0) {
+				printf("Unsupported png :(!\n");
+				exit(1);
+			}
+		} else if (strcmp((char *)type, "IDAT") == 0) {
+			continue;
+		} else if (islower((char)type[0]) || strcmp((char *)type, "PLTE") == 0) {
+			continue;
+		}  
+		else {
+			printf("Invalid chunk type %s.\n", (char *)type);
+			exit(1);
 		}
 		
 	
