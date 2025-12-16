@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <sys/stat.h>
+#include <zlib.h>
 
-
-int buffer_to_int(unsigned char *buf, int s) {
+uint32_t buffer_to_int(unsigned char *buf, int s) {
 	return ((int)buf[s+0]<<24)|((int)buf[s+1]<<16)|((int)buf[s+2]<<8)|((int)buf[s+3]<<0);
 }
 
@@ -61,8 +61,8 @@ int main(int argc, char** argv) {
 	unsigned char length[4] = {0};
 	unsigned char type[5] = {0};
 	unsigned char crc[4] = {0};
-	int WIDTH = 600;
-	int HEIGHT = 600;	
+	uint32_t WIDTH = -1;
+	uint32_t HEIGHT = -1;	
 	int BIT_DEPTH = -1;
 	int COLOR_TYPE = -1;
 	int COMPRESSION = -1;
@@ -76,18 +76,33 @@ int main(int argc, char** argv) {
 		size_t type_ret = fread(type, 1, 4, pfile);
 		if (type_ret != 4) {  printf("fread error (type)\n"); exit(1);  }
 		
-		int len = buffer_to_int(length, 0);
+		uint32_t len = buffer_to_int(length, 0);
 		unsigned char* data = (unsigned char *)malloc(len);
 		size_t data_ret = fread(data, 1, len, pfile);
 		if (data_ret != len) {  printf("fread error (data)\n"); exit(1);  }
 
 		size_t crc_ret = fread(crc, 1, 4, pfile);
 		if (crc_ret != 4) {  printf("fread error (crc)\n"); exit(1);  }
+		uint32_t crc_int = buffer_to_int(crc, 0);
+
+		uLong crc_calc = crc32(0L, Z_NULL, 0);
+		crc_calc = crc32(crc_calc, type, 4);
+		if (len > 0) crc_calc = crc32(crc_calc, data, len);
+
+		if (crc_calc != crc_int) {
+			printf("CRC mismatch!\n");
+			exit(1);
+		}
 	
 		if (strcmp((char *)type, "IEND") == 0) {
 			printf("REACHED END OF PNG\n");
 			break;
 		} else if (strcmp((char *)type, "IHDR") == 0) {
+			if (len != 13) {
+				printf("Invalid header chunk\n");
+				exit(1);
+			}
+			
 			WIDTH = buffer_to_int(data, 0);
 			HEIGHT = buffer_to_int(data, 4);	
 			BIT_DEPTH = (0x0) | data[8];
@@ -96,6 +111,9 @@ int main(int argc, char** argv) {
 			FILTER = (0x0) | data[11];
 			INTERLACE = (0x0) | data[12];	
 			printf("WIDTH: %d;\nHEIGHT: %d;\nBIT DEPTH: %d;\nCOLOR TYPE: %d;\nCOMPRESSION: %d;\nFILTER: %d;\nINTERLACE: %d;\n", WIDTH, HEIGHT, BIT_DEPTH, COLOR_TYPE, COMPRESSION, FILTER, INTERLACE);
+		
+			
+			
 		}
 		
 	
