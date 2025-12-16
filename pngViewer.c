@@ -4,14 +4,8 @@
 #include <sys/stat.h>
 
 
-//  default size of the window
-#define WIDTH 600
-#define HEIGHT 600
-
-
-int buffer_to_int(unsigned char *buf) {
-
-	return ((int)buf[0]<<24)|((int)buf[1]<<16)|((int)buf[2]<<8)|((int)buf[3]<<0);
+int buffer_to_int(unsigned char *buf, int s) {
+	return ((int)buf[s+0]<<24)|((int)buf[s+1]<<16)|((int)buf[s+2]<<8)|((int)buf[s+3]<<0);
 }
 
 
@@ -67,18 +61,23 @@ int main(int argc, char** argv) {
 	unsigned char length[4] = {0};
 	unsigned char type[5] = {0};
 	unsigned char crc[4] = {0};
-	
+	int WIDTH = 600;
+	int HEIGHT = 600;	
+	int BIT_DEPTH = -1;
+	int COLOR_TYPE = -1;
+	int COMPRESSION = -1;
+	int FILTER = -1;
+	int INTERLACE = -1;
 
 	while (1) {
-		printf("Chunk %d\n", chunks);
 		size_t length_ret = fread(length, 1, 4, pfile);
 		if (length_ret != 4) {  printf("fread error (length)\n"); exit(1);  }
 
 		size_t type_ret = fread(type, 1, 4, pfile);
 		if (type_ret != 4) {  printf("fread error (type)\n"); exit(1);  }
 		
-		int len = buffer_to_int(length);
-		unsigned char data[len];
+		int len = buffer_to_int(length, 0);
+		unsigned char* data = (unsigned char *)malloc(len);
 		size_t data_ret = fread(data, 1, len, pfile);
 		if (data_ret != len) {  printf("fread error (data)\n"); exit(1);  }
 
@@ -86,12 +85,23 @@ int main(int argc, char** argv) {
 		if (crc_ret != 4) {  printf("fread error (crc)\n"); exit(1);  }
 	
 		if (strcmp((char *)type, "IEND") == 0) {
-			printf("Reached end\n");
+			printf("REACHED END OF PNG\n");
 			break;
+		} else if (strcmp((char *)type, "IHDR") == 0) {
+			WIDTH = buffer_to_int(data, 0);
+			HEIGHT = buffer_to_int(data, 4);	
+			BIT_DEPTH = (0x0) | data[8];
+			COLOR_TYPE = (0x0) | data[9];
+			COMPRESSION = (0x0) | data[10];
+			FILTER = (0x0) | data[11];
+			INTERLACE = (0x0) | data[12];	
+			printf("WIDTH: %d;\nHEIGHT: %d;\nBIT DEPTH: %d;\nCOLOR TYPE: %d;\nCOMPRESSION: %d;\nFILTER: %d;\nINTERLACE: %d;\n", WIDTH, HEIGHT, BIT_DEPTH, COLOR_TYPE, COMPRESSION, FILTER, INTERLACE);
 		}
 		
 	
 	}
+
+
 
 	SDL_Window *pwindow = SDL_CreateWindow("pngViewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
 
