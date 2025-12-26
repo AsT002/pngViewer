@@ -17,6 +17,17 @@ void validate(int cond, const char* msg, int exit_after) {
 	}
 }
 
+unsigned char paeth_pred(unsigned char a, unsigned char b, unsigned char c) {
+    int p  = (int)a + (int)b - (int)c;
+    int pa = abs(p - (int)a);
+    int pb = abs(p - (int)b);
+    int pc = abs(p - (int)c);
+
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
+}
+
 
 int main(int argc, char** argv) {
 	validate(argc >= 2, "Please include the path to the png file in the args.\n", 1);
@@ -118,6 +129,7 @@ int main(int argc, char** argv) {
 			memcpy(idat + idat_len, data, len);
 			idat_len += len;
 		} else if (islower((char)type[0]) || strcmp((char *)type, "PLTE") == 0) {
+			free(data);
 			continue;
 		}  
 		else {
@@ -149,7 +161,7 @@ int main(int argc, char** argv) {
 
 	inflateEnd(&zs);
 
-	// unfilter (each height contains a filter byte at the start)
+	// unfilter (each row contains a filter byte at the start)
 	/*
 	filters: (https://www.libpng.org/pub/png/spec/1.2/PNG-Filters.html)
 		0 None,
@@ -159,9 +171,79 @@ int main(int argc, char** argv) {
 		4 Paeth
 	*/
 
+	unsigned char* pixels = malloc(WIDTH * HEIGHT * 4);
+	unsigned int bpp = 4; // bytes per pixel
+	unsigned char* prev = NULL; // stores previous row
+
+	for (unsigned int row = 0; row < HEIGHT; row ++) {
+		 unsigned char *row_s = inflated + (size_t)(row) * (1 + row_bytes); // cast should be safe as row shouldn't be negative
+		 unsigned char filter_type = row_s[0];
+		 unsigned char *src = row_s + 1;
+		 unsigned char *dst = pixels + (size_t)(row) * row_bytes; // since we don't need the filter byte
+
+		 switch ((int)filter_type) {
+			case 0:
+				memcpy(dst, src, row_bytes);
+				break;
+			case 1: // Sub
+				for (unsigned int i = 0; i < row_bytes; i ++) {
+					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
+					dst[i] = (src[i] + left);
+				}
+				break;
+			case 2: // Up
+				for (unsigned int i = 0; i < row_bytes; i ++) {
+					unsigned char up = prev ? prev[i] : 0;
+					dst[i] = (src[i] + up);
+				}
+				break;
+			case 3: // Average
+				for (unsigned int i = 0; i < row_bytes; i ++) {
+					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
+					unsigned char up = prev ? prev[i] : 0;
+					dst[i] = (unsigned char)(src[i] + (unsigned char)(((int)left + (int)up) / 2));
+				}
+				break;
+			case 4: // Paeth
+				for (unsigned int i = 0; i < row_bytes; i ++) {
+					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
+					unsigned char up = prev ? prev[i] : 0;
+					unsigned char up_left = (prev && i >= bpp) ? prev[i - bpp] : 0;
+					unsigned char pred = paeth_pred(left, up, up_left);
+					dst[i] = (src[i] + pred);
+				}
+				break;
+		 }
+		 prev = dst;
+	}
 
 	SDL_Window *pwindow = SDL_CreateWindow("pngViewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
+	SDL_Surface *psurface = SDL_GetWindowSurface(pwindow);
 
-	SDL_Delay(5000);
+	SDL_Surface *img = SDL_CreateRGBSurfaceWithFormatFrom(pixels, WIDTH, HEIGHT, 32, WIDTH * 4, SDL_PIXELFORMAT_RGBA32);
+
+	validate(img != NULL, "SDL error\n", 1);
+
+	SDL_Surface *img_conv = SDL_ConvertSurface(img, psurface->format, 0);
+	validate(img_conv != NULL, "convert surface error\n", 1);
+
+	SDL_BlitSurface(img_conv, NULL, psurface, NULL);
+	SDL_UpdateWindowSurface(pwindow);
+
+	SDL_Event e;
+	int running = 1;
+
+	while (running) {
+		while (SDL_PollEvent(&e)) {
+			if (e.type == SDL_QUIT) running = 0;
+		}
+	}
+
 	free(idat);
+	SDL_FreeSurface(img_conv);
+	SDL_FreeSurface(img);
+	SDL_DestroyWindow(pwindow);
+	SDL_Quit();
+	free(pixels);
+	free(inflated);
 }
