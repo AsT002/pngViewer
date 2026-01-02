@@ -76,14 +76,9 @@ int main(int argc, char** argv) {
 	};
 
 	// check each 8 bytes
-	int is_png = 1;
 	for (size_t i = 0; i < 8; i ++) {
-		if (mb_buff[i] != PNG_MAGIC[i]) { 
-			is_png = 0; 
-			break; 
-		}
+		validate(mb_buff[i] == PNG_MAGIC[i], "The file  given is not a PNG file. Magic bytes do not match.", 1);
 	}
-	validate(is_png, "The file given is not a PNG file. Magic bytes do not match.", 1);
 	
 	// After Magic Byte, expect IHDR chunk
 	// Each chunk has: Length (4 byte), Type (IHDR, IDAT, IEND), Data: (Length) Bytes, CRC (Cyclic Redundancy Check, type + data): 4 Bytes
