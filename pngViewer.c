@@ -5,103 +5,131 @@
 #include <zlib.h>
 #include <ctype.h>
 
-uint32_t buffer_to_int(unsigned char *buf, int s) {
-	return ((int)buf[s+0]<<24)|((int)buf[s+1]<<16)|((int)buf[s+2]<<8)|((int)buf[s+3]<<0);
+uint32_t buffer_to_int(uint8_t *buf, int s) {
+	// Turn values (each 1 byte) from an array into a single four byte unsigned number.
+	return ((uint32_t)buf[s + 0] << 24 | (uint32_t)buf[s + 1] << 16 \
+	| (uint32_t)buf[s + 2] << 8 | (uint32_t)buf[s + 3] << 0);
+
+	/* Process Example:
+		buf = {0xAA, 0xBB, 0xCC, 0xDD} 
+		0xAA000000 (0xAA left shifted 24 bits (or 6 hex characters)) | 
+			0xBB0000 (0xBB left shifted 16 bits) |
+				0xCC00 (0xCC left shifted 8 bits) |
+					0xDD 
+						The OR operator will join A and B together; (0b0101 | 0b1000 = 0b1101)
+		0xAA000000 |
+		0x00BB0000 |
+		0x0000CC00 |
+		0x000000DD = 0xAABBCCDD
+	*/
 }
 
 void validate(int cond, const char* msg, int exit_after) {
+	// This functions simply checks whether cond is false and if it is, 
+		// it prints out a message in STDERR and if exit_after is NONZERO, it will exit with that code
 	if (!cond) {
-		printf("%s", msg);
+		fprintf(stderr, "%s\n", msg);
 		if (exit_after) 
 			exit(exit_after);
 	}
 }
 
-unsigned char paeth_pred(unsigned char a, unsigned char b, unsigned char c) {
-    int p  = (int)a + (int)b - (int)c;
-    int pa = abs(p - (int)a);
-    int pb = abs(p - (int)b);
-    int pc = abs(p - (int)c);
+uint8_t paeth_pred(uint8_t a, uint8_t b, uint8_t c) {
+    // a -> byte to the left of current byte
+	// b -> byte directly above the current byte (previous row)
+	// c -> byte top-left of the current byte (previous row)
 
-    if (pa <= pb && pa <= pc) return a;
+	int p  = (int)a + (int)b - (int)c; // initial estimate (p = a + b - c)
+    int pa = abs(p - (int)a); // abs distance btwn estimated p and a
+    int pb = abs(p - (int)b); // abs distance btwm p and b
+    int pc = abs(p - (int)c); // abs distance btwn p and c
+
+	// choose the closest estimate (priority: a > b > c)
+    if (pa <= pb && pa <= pc) return a; 
     if (pb <= pc) return b;
     return c;
 }
 
 
 int main(int argc, char** argv) {
-	validate(argc >= 2, "Please include the path to the png file in the args.\n", 1);
+	// usage: ./pngViewer "png path" ;; argv[0] argv[1]
+	validate(argc >= 2, "Please include the path to the png file in the args.", 1);
 
+	// check if the path specified actually exists
 	char* pngPath = argv[1];
 	struct stat buffer;
-	validate(stat(pngPath, &buffer) == 0, "Couldn't find the PNG file specified in the args.\n", 1);
+	validate(stat(pngPath, &buffer) == 0, "Couldn't find the PNG file specified in the args.", 1);
 
+	// open the file
 	FILE *pfile = fopen(pngPath, "rb");
-	validate(pfile != NULL, "fopen ran into an issue while opening the png file.\n", 1);
+	validate(pfile != NULL, "fopen ran into an issue while opening the png file.", 1);
 	
-	unsigned char mb_buff[8];
+	// read the first 8 bytes of the file
+	uint8_t mb_buff[8];
 	size_t ret = fread(mb_buff, 1, 8, pfile);
-	validate(ret == 8, "Error reading the PNG file. (MB)\n", 1);
+	validate(ret == 8, "Error reading the PNG file. (MB)", 1);
 
-	const uint8_t png_magic[8] = {
+	// expected magic bytes for a png file
+	const uint8_t PNG_MAGIC[8] = {
 		0x89, 0x50, 0x4E, 0x47,
 		0x0D, 0x0A, 0x1A, 0x0A	
 	};
 
+	// check each 8 bytes
 	int is_png = 1;
 	for (size_t i = 0; i < 8; i ++) {
-		if (mb_buff[i] != png_magic[i]) { 
+		if (mb_buff[i] != PNG_MAGIC[i]) { 
 			is_png = 0; 
 			break; 
 		}
 	}
-	validate(is_png, "The file given is not a PNG file. Magic bytes do not match.\n", 1);
+	validate(is_png, "The file given is not a PNG file. Magic bytes do not match.", 1);
 	
 	// After Magic Byte, expect IHDR chunk
 	// Each chunk has: Length (4 byte), Type (IHDR, IDAT, IEND), Data: (Length) Bytes, CRC (Cyclic Redundancy Check, type + data): 4 Bytes
 
-	unsigned char length[4] = {0};
-	unsigned char type[5] = {0};
-	unsigned char crc[4] = {0};
-	uint32_t WIDTH = -1;
-	uint32_t HEIGHT = -1;	
+	uint8_t length[4] = {0};
+	uint8_t type[5] = {0};
+	uint8_t crc[4] = {0};
+	uint32_t WIDTH = 0;
+	uint32_t HEIGHT = 0;	
 	int BIT_DEPTH = -1;
 	int COLOR_TYPE = -1;
 	int COMPRESSION = -1;
 	int FILTER = -1;
 	int INTERLACE = -1;
-	unsigned char *idat = NULL;
+	uint8_t* idat = NULL;
 	long idat_len = 0;
 
 	while (1) {
 		size_t length_ret = fread(length, 1, 4, pfile);
-		validate(length_ret == 4, "fread error (length)\n", 1);
+		validate(length_ret == 4, "fread error (length)", 1);
 
 		size_t type_ret = fread(type, 1, 4, pfile);
-		validate(type_ret == 4, "fread error (type)\n", 1);
+		validate(type_ret == 4, "fread error (type)", 1);
 		
 		uint32_t len = buffer_to_int(length, 0);
-		unsigned char* data = (unsigned char *)malloc(len);
-		validate(data != NULL, "malloc error\n", 1);
+		uint8_t* data = malloc(len);
+		validate(data != NULL, "malloc error", 1);
 		size_t data_ret = fread(data, 1, len, pfile);
-		validate(data_ret == len, "fread error (data)\n", 1);
+		validate(data_ret == len, "fread error (data)", 1);
 
 		size_t crc_ret = fread(crc, 1, 4, pfile);
-		validate(crc_ret == 4, "fread error (crc)\n", 1);
+		validate(crc_ret == 4, "fread error (crc)", 1);
 
 		uint32_t crc_int = buffer_to_int(crc, 0);
 
 		uLong crc_calc = crc32(0L, Z_NULL, 0);
 		crc_calc = crc32(crc_calc, type, 4);
 		if (len > 0) crc_calc = crc32(crc_calc, data, len);
-		validate(crc_calc == crc_int, "CRC mismatch on chunk\n", 1);
+		validate(crc_calc == crc_int, "CRC mismatch on chunk", 1);
 		
 	
 		if (strcmp((char *)type, "IEND") == 0) {
-			printf("REACHED END OF PNG\n");
+			printf("REACHED END OF PNG");
 			break;
 		} else if (strcmp((char *)type, "IHDR") == 0) {
-			validate(len == 13, "Invalid header chunk\n", 1);
+			validate(len == 13, "Invalid header chunk", 1);
 			
 			WIDTH = buffer_to_int(data, 0);
 			HEIGHT = buffer_to_int(data, 4);	
@@ -120,12 +148,12 @@ int main(int argc, char** argv) {
 			validate(COLOR_TYPE == 6 && \
 				BIT_DEPTH == 8 && COMPRESSION == 0 && \
 				FILTER == 0 && INTERLACE == 0, \
-				"Unsupported Png :(\n", 1);
+				"Unsupported Png :(", 1);
 
 		} else if (strcmp((char *)type, "IDAT") == 0) {
 			// concat all the idat chunk data into one buffer
 			idat = realloc(idat, idat_len + len);
-			validate(idat != NULL, "realloc error\n", 1);
+			validate(idat != NULL, "realloc error", 1);
 			memcpy(idat + idat_len, data, len);
 			idat_len += len;
 		} else if (islower((char)type[0]) || strcmp((char *)type, "PLTE") == 0) {
@@ -143,12 +171,12 @@ int main(int argc, char** argv) {
 	// inflate the concat'd idat with zlib
 	uint32_t row_bytes = WIDTH * 4;
 	uint32_t expected = HEIGHT * (1 + row_bytes);
-	unsigned char *inflated = malloc(expected);
-	validate(inflated != NULL, "malloc error\n", 1);
+	uint8_t* inflated = malloc(expected);
+	validate(inflated != NULL, "malloc error", 1);
 
 	z_stream zs; 
 	memset(&zs, 0, sizeof(zs));
-	validate(inflateInit(&zs) == Z_OK, "inflateInit failed\n", 1);
+	validate(inflateInit(&zs) == Z_OK, "inflateInit failed", 1);
 
 	zs.next_in = idat;
 	zs.avail_in = idat_len;
@@ -156,8 +184,8 @@ int main(int argc, char** argv) {
 	zs.avail_out = expected;
 
 	int r = inflate(&zs, Z_FINISH);
-	validate(r == Z_STREAM_END, "inflate failed\n", r);
-	validate(zs.total_out == expected, "unexpected inflate size\n", 1);
+	validate(r == Z_STREAM_END, "inflate failed", r);
+	validate(zs.total_out == expected, "unexpected inflate size", 1);
 
 	inflateEnd(&zs);
 
@@ -171,15 +199,15 @@ int main(int argc, char** argv) {
 		4 Paeth
 	*/
 
-	unsigned char* pixels = malloc(WIDTH * HEIGHT * 4);
+	uint8_t* pixels = malloc(WIDTH * HEIGHT * 4);
 	unsigned int bpp = 4; // bytes per pixel
-	unsigned char* prev = NULL; // stores previous row
+	uint8_t* prev = NULL; // stores previous row
 
 	for (unsigned int row = 0; row < HEIGHT; row ++) {
-		 unsigned char *row_s = inflated + (size_t)(row) * (1 + row_bytes); // cast should be safe as row shouldn't be negative
-		 unsigned char filter_type = row_s[0];
-		 unsigned char *src = row_s + 1;
-		 unsigned char *dst = pixels + (size_t)(row) * row_bytes; // since we don't need the filter byte
+		 uint8_t *row_s = inflated + (size_t)(row) * (1 + row_bytes);
+		 uint8_t filter_type = row_s[0];
+		 uint8_t *src = row_s + 1;
+		 uint8_t *dst = pixels + (size_t)(row) * row_bytes; // since we don't need the filter byte
 
 		 switch ((int)filter_type) {
 			case 0:
@@ -187,29 +215,29 @@ int main(int argc, char** argv) {
 				break;
 			case 1: // Sub
 				for (unsigned int i = 0; i < row_bytes; i ++) {
-					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
+					uint8_t left = (i >= bpp) ? dst[i - bpp] : 0;
 					dst[i] = (src[i] + left);
 				}
 				break;
 			case 2: // Up
 				for (unsigned int i = 0; i < row_bytes; i ++) {
-					unsigned char up = prev ? prev[i] : 0;
+					uint8_t up = prev ? prev[i] : 0;
 					dst[i] = (src[i] + up);
 				}
 				break;
 			case 3: // Average
 				for (unsigned int i = 0; i < row_bytes; i ++) {
-					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
-					unsigned char up = prev ? prev[i] : 0;
-					dst[i] = (unsigned char)(src[i] + (unsigned char)(((int)left + (int)up) / 2));
+					uint8_t left = (i >= bpp) ? dst[i - bpp] : 0;
+					uint8_t up = prev ? prev[i] : 0;
+					dst[i] = (uint8_t)(src[i] + (uint8_t)(((int)left + (int)up) / 2));
 				}
 				break;
 			case 4: // Paeth
 				for (unsigned int i = 0; i < row_bytes; i ++) {
-					unsigned char left = (i >= bpp) ? dst[i - bpp] : 0;
-					unsigned char up = prev ? prev[i] : 0;
-					unsigned char up_left = (prev && i >= bpp) ? prev[i - bpp] : 0;
-					unsigned char pred = paeth_pred(left, up, up_left);
+					uint8_t left = (i >= bpp) ? dst[i - bpp] : 0;
+					uint8_t up = prev ? prev[i] : 0;
+					uint8_t up_left = (prev && i >= bpp) ? prev[i - bpp] : 0;
+					uint8_t pred = paeth_pred(left, up, up_left);
 					dst[i] = (src[i] + pred);
 				}
 				break;
@@ -222,10 +250,10 @@ int main(int argc, char** argv) {
 
 	SDL_Surface *img = SDL_CreateRGBSurfaceWithFormatFrom(pixels, WIDTH, HEIGHT, 32, WIDTH * 4, SDL_PIXELFORMAT_RGBA32);
 
-	validate(img != NULL, "SDL error\n", 1);
+	validate(img != NULL, "SDL error", 1);
 
 	SDL_Surface *img_conv = SDL_ConvertSurface(img, psurface->format, 0);
-	validate(img_conv != NULL, "convert surface error\n", 1);
+	validate(img_conv != NULL, "convert surface error", 1);
 
 	SDL_BlitSurface(img_conv, NULL, psurface, NULL);
 	SDL_UpdateWindowSurface(pwindow);
